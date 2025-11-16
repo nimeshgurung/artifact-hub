@@ -3,18 +3,33 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { ArtifactService } from '../services/ArtifactService';
 import type { UpdateService } from '../services/UpdateService';
+import type { SearchService } from '../services/SearchService';
+import type { HttpClient } from '../services/HttpClient';
+import type { AuthService } from '../services/AuthService';
 import type { WebviewMessage } from './common/ipc';
+import type { InstallationWithUpdate } from '../models/types';
 import { Configuration } from '../config/configuration';
+import { PreviewPanelProvider } from './PreviewPanelProvider';
 
 export class InstalledViewProvider implements vscode.WebviewViewProvider {
   private webviewView?: vscode.WebviewView;
+  private previewPanel: PreviewPanelProvider;
 
   constructor(
     private context: vscode.ExtensionContext,
     private artifactService: ArtifactService,
     private updateService: UpdateService,
-    private config: Configuration
-  ) {}
+    private config: Configuration,
+    private searchService: SearchService,
+    private http: HttpClient,
+    private authService: AuthService,
+    private onInstallationsChanged?: () => void | Promise<void>
+  ) {
+    this.previewPanel = new PreviewPanelProvider(context, artifactService, config, async () => {
+      await this.refreshInstalled();
+      await this.onInstallationsChanged?.();
+    });
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -72,6 +87,7 @@ export class InstalledViewProvider implements vscode.WebviewViewProvider {
         const updates = await this.updateService.checkForUpdates(configs);
         const artifacts = this.updateService.getInstallationsWithUpdates(updates);
         webview.postMessage({ type: 'installedArtifacts', artifacts });
+        await this.onInstallationsChanged?.();
         break;
       }
 
@@ -98,9 +114,80 @@ export class InstalledViewProvider implements vscode.WebviewViewProvider {
         const updates = await this.updateService.checkForUpdates(configs);
         const artifacts = this.updateService.getInstallationsWithUpdates(updates);
         webview.postMessage({ type: 'installedArtifacts', artifacts });
+        await this.onInstallationsChanged?.();
+        break;
+      }
+
+      case 'preview': {
+        await this.handlePreview(message.catalogId, message.artifactId);
+        break;
+      }
+
+      case 'showInstallationDetails': {
+        this.showInstallationDetails(message.installation);
         break;
       }
     }
+  }
+
+  private async handlePreview(catalogId: string, artifactId: string): Promise<void> {
+    const artifact = this.searchService.getArtifact(catalogId, artifactId);
+    if (!artifact) {
+      vscode.window.showErrorMessage('Artifact not found.');
+      return;
+    }
+
+    const repos = this.config.getRepositories();
+    const repoConfig = repos.find(r => r.id === catalogId);
+    const auth = repoConfig ? await this.authService.resolveAuth(repoConfig.id, repoConfig.auth) : undefined;
+
+    try {
+      const content = await this.http.fetchText(artifact.sourceUrl, { auth });
+      await this.previewPanel.showPreview(artifact, content);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Failed to load artifact content';
+      vscode.window.showErrorMessage(error);
+    }
+  }
+
+  private async showInstallationDetails(installation: InstallationWithUpdate): Promise<void> {
+    const artifactName = installation.artifact?.name ?? installation.artifactId;
+    const catalogLine = `Catalog: ${installation.catalogId}`;
+    const versionLine = installation.newVersion
+      ? `Version: ${installation.version} → ${installation.newVersion}`
+      : `Version: ${installation.version}`;
+    const pathLine = `Path: ${installation.installedPath}`;
+    const installedLine = `Installed: ${this.formatDateTime(installation.installedAt)}`;
+    const lastUsedLine = `Last used: ${installation.lastUsed ? this.formatDateTime(installation.lastUsed) : 'Never'}`;
+
+    const detail = [catalogLine, versionLine, pathLine, installedLine, lastUsedLine].join('\n');
+
+    const action = await vscode.window.showInformationMessage(
+      artifactName,
+      { modal: true, detail },
+      'Copy Path'
+    );
+
+    if (action === 'Copy Path') {
+      await vscode.env.clipboard.writeText(installation.installedPath);
+      vscode.window.showInformationMessage('Path copied to clipboard');
+    }
+  }
+
+  private formatDateTime(value: unknown): string {
+    const date = this.toDate(value);
+    return date ? date.toLocaleString() : 'Unknown';
+  }
+
+  private toDate(value: unknown): Date | null {
+    if (value instanceof Date) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
   }
 
   private getHtmlContent(webview: vscode.Webview): string {

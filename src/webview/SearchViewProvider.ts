@@ -19,9 +19,13 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
     private artifactService: ArtifactService,
     private http: HttpClient,
     private authService: AuthService,
-    private config: Configuration
+    private config: Configuration,
+    private onStateChanged?: () => void | Promise<void>
   ) {
-    this.previewPanel = new PreviewPanelProvider(context, artifactService, config);
+    this.previewPanel = new PreviewPanelProvider(context, artifactService, config, async () => {
+      this.refreshSearch();
+      await this.onStateChanged?.();
+    });
   }
 
   resolveWebviewView(
@@ -96,6 +100,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
               });
             }
           });
+          await this.onStateChanged?.();
         } else {
           vscode.window.showErrorMessage(`Failed to install: ${result.error}`);
         }
@@ -133,6 +138,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
         try {
           await this.artifactService.uninstall(message.catalogId, message.artifactId);
           webview.postMessage({ type: 'uninstallResult', success: true });
+          await this.onStateChanged?.();
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Unknown error';
           webview.postMessage({ type: 'uninstallResult', success: false, error });

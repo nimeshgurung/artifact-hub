@@ -8,16 +8,16 @@ let catalogs: CatalogRecord[] = [];
 // DOM Elements
 let catalogsContainer: HTMLElement;
 let addBtn: HTMLButtonElement;
-let addDialog: HTMLElement;
 let refreshAllBtn: HTMLButtonElement;
 
 function init() {
   catalogsContainer = document.getElementById('catalogsContainer') as HTMLElement;
   addBtn = document.getElementById('addCatalog') as HTMLButtonElement;
-  addDialog = document.getElementById('addDialog') as HTMLElement;
   refreshAllBtn = document.getElementById('refreshAll') as HTMLButtonElement;
 
-  addBtn.addEventListener('click', showAddDialog);
+  addBtn.addEventListener('click', () => {
+    sendMessage({ type: 'openAddRepository' });
+  });
   refreshAllBtn.addEventListener('click', () => {
     sendMessage({ type: 'refreshAllCatalogs' });
   });
@@ -43,16 +43,20 @@ function createCatalogCard(catalog: CatalogRecord): HTMLElement {
   const card = document.createElement('div');
   card.className = 'catalog-card';
 
-  const statusIcon = catalog.status === 'healthy' ? '✅' : catalog.status === 'error' ? '❌' : '⏳';
-  const artifactCount = 0; // Will be populated by extension
+  const artifactCount = typeof catalog.artifactCount === 'number' ? catalog.artifactCount : 0;
+  const statusPills = [createStatusPill(catalog.status)];
+  if (!catalog.enabled) {
+    statusPills.push('<span class="status-pill status-disabled">Disabled</span>');
+  }
 
   card.innerHTML = `
     <div class="catalog-header">
-      <div class="catalog-status">
-        ${statusIcon}
-        <input type="checkbox" ${catalog.enabled ? 'checked' : ''} data-catalog-id="${catalog.id}">
+      <div class="catalog-title">
+        <h3>${escapeHtml(catalog.metadata.name)}</h3>
+        <div class="catalog-status">
+          ${statusPills.join('')}
+        </div>
       </div>
-      <h3>${escapeHtml(catalog.metadata.name)}</h3>
     </div>
     <div class="catalog-url">${escapeHtml(catalog.url)}</div>
     <p class="catalog-description">${escapeHtml(catalog.metadata.description)}</p>
@@ -63,105 +67,19 @@ function createCatalogCard(catalog: CatalogRecord): HTMLElement {
     ${catalog.error ? `<div class="catalog-error">Error: ${escapeHtml(catalog.error)}</div>` : ''}
     <div class="catalog-actions">
       <button class="btn-secondary" data-action="refresh">Refresh</button>
-      <button class="btn-secondary" data-action="edit">Edit</button>
       <button class="btn-danger" data-action="remove">Remove</button>
     </div>
   `;
-
-  const checkbox = card.querySelector('input[type="checkbox"]') as HTMLInputElement;
-  checkbox.addEventListener('change', () => {
-    sendMessage({
-      type: 'toggleCatalog',
-      catalogId: catalog.id,
-      enabled: checkbox.checked
-    });
-  });
 
   card.querySelector('[data-action="refresh"]')?.addEventListener('click', () => {
     sendMessage({ type: 'refreshCatalog', catalogId: catalog.id });
   });
 
-  card.querySelector('[data-action="edit"]')?.addEventListener('click', () => {
-    showEditDialog(catalog);
-  });
-
   card.querySelector('[data-action="remove"]')?.addEventListener('click', () => {
-    if (confirm(`Remove catalog "${catalog.metadata.name}"?`)) {
-      sendMessage({ type: 'removeCatalog', catalogId: catalog.id });
-    }
+    sendMessage({ type: 'removeCatalog', catalogId: catalog.id });
   });
 
   return card;
-}
-
-function showAddDialog() {
-  addDialog.innerHTML = `
-    <div class="dialog-content">
-      <h2>Add Repository</h2>
-      <form id="addForm">
-        <div class="form-group">
-          <label>Repository URL *</label>
-          <input type="url" id="repoUrl" required placeholder="https://gitlab.com/org/repo/-/raw/main/catalog.json">
-        </div>
-        <div class="form-group">
-          <label>Repository ID</label>
-          <input type="text" id="repoId" placeholder="Auto-generated from URL">
-        </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="requiresAuth">
-            Requires Authentication
-          </label>
-        </div>
-        <div class="form-actions">
-          <button type="button" class="btn-secondary" onclick="closeAddDialog()">Cancel</button>
-          <button type="submit" class="btn-primary">Add</button>
-        </div>
-      </form>
-    </div>
-  `;
-
-  addDialog.style.display = 'block';
-
-  document.getElementById('addForm')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const url = (document.getElementById('repoUrl') as HTMLInputElement).value;
-    const id = (document.getElementById('repoId') as HTMLInputElement).value || generateIdFromUrl(url);
-    const requiresAuth = (document.getElementById('requiresAuth') as HTMLInputElement).checked;
-
-    sendMessage({
-      type: 'addCatalog',
-      config: {
-        id,
-        url,
-        enabled: true,
-        auth: requiresAuth ? { type: 'bearer' } : undefined,
-      },
-    });
-
-    closeAddDialog();
-  });
-}
-
-function closeAddDialog() {
-  addDialog.style.display = 'none';
-}
-
-(window as any).closeAddDialog = closeAddDialog;
-
-function showEditDialog(_catalog: CatalogRecord) {
-  // Similar to add dialog but with existing values
-  alert('Edit functionality not yet implemented');
-}
-
-function generateIdFromUrl(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    const parts = urlObj.pathname.split('/').filter(p => p.length > 0);
-    return parts.slice(-3, -1).join('-').toLowerCase();
-  } catch {
-    return 'custom-catalog';
-  }
 }
 
 // Message handling
@@ -202,7 +120,11 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-function formatDate(date: Date): string {
+function formatDate(value: Date | string): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date';
+  }
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
@@ -210,6 +132,38 @@ function formatDate(date: Date): string {
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
   return date.toLocaleString();
+}
+
+function createStatusPill(status: CatalogRecord['status']): string {
+  const label = getStatusLabel(status);
+  const statusClass = getStatusClass(status);
+  return `<span class="status-pill ${statusClass}">${label}</span>`;
+}
+
+function getStatusLabel(status: CatalogRecord['status']): string {
+  switch (status) {
+    case 'healthy':
+      return 'Healthy';
+    case 'updating':
+      return 'Syncing';
+    case 'error':
+      return 'Error';
+    default:
+      return 'Unknown';
+  }
+}
+
+function getStatusClass(status: CatalogRecord['status']): string {
+  switch (status) {
+    case 'healthy':
+      return 'status-healthy';
+    case 'updating':
+      return 'status-updating';
+    case 'error':
+      return 'status-error';
+    default:
+      return 'status-unknown';
+  }
 }
 
 // Initialize

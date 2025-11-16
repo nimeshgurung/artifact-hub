@@ -11,6 +11,8 @@ import { UpdateService } from './services/UpdateService';
 import { StatusBarService } from './services/StatusBarService';
 // import { ProfileService } from './services/ProfileService'; // Reserved for future use
 import { SearchViewProvider } from './webview/SearchViewProvider';
+import { InstalledViewProvider } from './webview/InstalledViewProvider';
+import { RepositoriesViewProvider } from './webview/RepositoriesViewProvider';
 
 let refreshInterval: NodeJS.Timeout | null = null;
 
@@ -33,6 +35,22 @@ export async function activate(context: vscode.ExtensionContext) {
   // ProfileService available for future use
   // const profileService = new ProfileService(artifactService, searchService);
 
+  const refreshInstalledAndStatus = async () => {
+    await installedViewProvider?.refreshInstalled();
+    await updateStatusBar();
+  };
+
+  const refreshSearchAndStatus = async () => {
+    searchViewProvider?.refreshSearch();
+    await updateStatusBar();
+  };
+
+  const refreshAllViews = async () => {
+    searchViewProvider?.refreshSearch();
+    await installedViewProvider?.refreshInstalled();
+    await updateStatusBar();
+  };
+
   // Register webview providers
   const searchViewProvider = new SearchViewProvider(
     context,
@@ -40,11 +58,32 @@ export async function activate(context: vscode.ExtensionContext) {
     artifactService,
     http,
     authService,
-    config
+    config,
+    refreshInstalledAndStatus
+  );
+
+  const installedViewProvider = new InstalledViewProvider(
+    context,
+    artifactService,
+    updateService,
+    config,
+    searchService,
+    http,
+    authService,
+    refreshSearchAndStatus
+  );
+
+  const repositoriesViewProvider = new RepositoriesViewProvider(
+    context,
+    catalogService,
+    config,
+    refreshAllViews
   );
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('artifact-hub.search', searchViewProvider)
+    vscode.window.registerWebviewViewProvider('artifact-hub.search', searchViewProvider),
+    vscode.window.registerWebviewViewProvider('artifact-hub.installed', installedViewProvider),
+    vscode.window.registerWebviewViewProvider('artifact-hub.repositories', repositoriesViewProvider)
   );
 
   // Register commands
@@ -112,6 +151,49 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch (err) {
         const error = err instanceof Error ? err.message : 'Unknown error';
         vscode.window.showErrorMessage(`Failed to add catalog: ${error}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('artifact-hub.removeRepository', async () => {
+      const configs = config.getRepositories();
+
+      if (configs.length === 0) {
+        vscode.window.showInformationMessage('No repositories configured');
+        return;
+      }
+
+      const items = configs.map(c => ({
+        label: c.id,
+        description: c.url,
+        detail: catalogService.getCatalog(c.id)?.metadata.description || '',
+        catalogId: c.id
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select repository to remove',
+        matchOnDescription: true,
+        matchOnDetail: true
+      });
+
+      if (!selected) return;
+
+      try {
+        await catalogService.removeCatalog(selected.catalogId);
+
+        const updatedConfigs = configs.filter(c => c.id !== selected.catalogId);
+        await config.setRepositories(updatedConfigs);
+
+        // Refresh views
+        await refreshAllViews();
+
+        vscode.window.showInformationMessage(`Removed repository: ${selected.catalogId}`);
+      } catch (err) {
+        // Error already handled in service (user cancellation or actual error)
+        if (err instanceof Error && !err.message.includes('not found')) {
+          console.error('Failed to remove repository:', err);
+        }
       }
     })
   );

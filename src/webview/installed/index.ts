@@ -100,30 +100,22 @@ function createInstallationCard(inst: InstallationWithUpdate): HTMLElement {
   });
 
   card.querySelector('[data-action="details"]')?.addEventListener('click', () => {
-    showDetails(inst);
+    if (inst.artifact) {
+      sendMessage({ type: 'preview', catalogId: inst.catalogId, artifactId: inst.artifactId });
+    } else {
+      showDetails(inst);
+    }
   });
 
   card.querySelector('[data-action="uninstall"]')?.addEventListener('click', () => {
-    if (confirm(`Uninstall ${artifact?.name || inst.artifactId}?`)) {
-      sendMessage({ type: 'uninstall', catalogId: inst.catalogId, artifactId: inst.artifactId });
-    }
+    sendMessage({ type: 'uninstall', catalogId: inst.catalogId, artifactId: inst.artifactId });
   });
 
   return card;
 }
 
 function showDetails(inst: InstallationWithUpdate) {
-  // Show details modal or panel
-  const artifact = inst.artifact;
-  if (!artifact) return;
-
-  alert(`
-Name: ${artifact.name}
-Version: ${inst.version}
-Category: ${artifact.category}
-Path: ${inst.installedPath}
-Installed: ${inst.installedAt.toLocaleString()}
-  `.trim());
+  sendMessage({ type: 'showInstallationDetails', installation: inst });
 }
 
 // Message handling
@@ -152,7 +144,10 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-function formatDate(date: Date): string {
+function formatDate(value: Date | string): string {
+  const date = toDate(value);
+  if (!date) return 'Unknown';
+
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
@@ -164,6 +159,19 @@ function formatDate(date: Date): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString();
+}
+
+function formatDateTime(value: Date | string): string {
+  const date = toDate(value);
+  return date ? date.toLocaleString() : 'Unknown';
+}
+
+function toDate(value: Date | string): Date | null {
+  if (value instanceof Date) {
+    return value;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 // Initialize

@@ -9,7 +9,8 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private context: vscode.ExtensionContext,
     private catalogService: CatalogService,
-    private config: Configuration
+    private config: Configuration,
+    private onCatalogsChanged?: () => void | Promise<void>
   ) {}
 
   resolveWebviewView(
@@ -41,8 +42,7 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
   private async handleMessage(message: WebviewMessage, webview: vscode.Webview): Promise<void> {
     switch (message.type) {
       case 'getCatalogs': {
-        const catalogs = this.catalogService.getAllCatalogs();
-        webview.postMessage({ type: 'catalogs', catalogs });
+        this.postCatalogs(webview);
         break;
       }
 
@@ -57,18 +57,28 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
           webview.postMessage({ type: 'catalogAdded', catalog });
         }
 
+        await this.notifyCatalogsChanged(webview);
         vscode.window.showInformationMessage(`Added catalog: ${message.config.id}`);
         break;
       }
 
       case 'removeCatalog': {
-        await this.catalogService.removeCatalog(message.catalogId);
+        try {
+          await this.catalogService.removeCatalog(message.catalogId);
 
-        const configs = this.config.getRepositories();
-        await this.config.setRepositories(configs.filter(c => c.id !== message.catalogId));
+          const configs = this.config.getRepositories();
+          await this.config.setRepositories(configs.filter(c => c.id !== message.catalogId));
 
-        webview.postMessage({ type: 'catalogRemoved', catalogId: message.catalogId });
-        vscode.window.showInformationMessage(`Removed catalog: ${message.catalogId}`);
+          webview.postMessage({ type: 'catalogRemoved', catalogId: message.catalogId });
+          await this.notifyCatalogsChanged(webview);
+          vscode.window.showInformationMessage(`Removed repository: ${message.catalogId}`);
+        } catch (err) {
+          // User cancelled or error occurred
+          if (err instanceof Error && err.message.includes('not found')) {
+            webview.postMessage({ type: 'error', message: err.message });
+          }
+          // Don't show error for user cancellation
+        }
         break;
       }
 
@@ -84,6 +94,7 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
             webview.postMessage({ type: 'catalogUpdated', catalog });
           }
 
+          await this.onCatalogsChanged?.();
           vscode.window.showInformationMessage(`Refreshed catalog: ${message.catalogId}`);
         }
         break;
@@ -93,8 +104,7 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
         const configs = this.config.getRepositories();
         await this.catalogService.refreshAll(configs);
 
-        const catalogs = this.catalogService.getAllCatalogs();
-        webview.postMessage({ type: 'catalogs', catalogs });
+        await this.notifyCatalogsChanged(webview);
 
         vscode.window.showInformationMessage('All catalogs refreshed');
         break;
@@ -115,9 +125,31 @@ export class RepositoriesViewProvider implements vscode.WebviewViewProvider {
         if (catalog) {
           webview.postMessage({ type: 'catalogUpdated', catalog });
         }
+        await this.onCatalogsChanged?.();
+        break;
+      }
+
+      case 'openAddRepository': {
+        try {
+          await vscode.commands.executeCommand('artifact-hub.addRepository');
+          await this.notifyCatalogsChanged(webview);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Failed to open add repository flow';
+          webview.postMessage({ type: 'error', message: error });
+        }
         break;
       }
     }
+  }
+
+  private postCatalogs(webview: vscode.Webview) {
+    const catalogs = this.catalogService.getAllCatalogs();
+    webview.postMessage({ type: 'catalogs', catalogs });
+  }
+
+  private async notifyCatalogsChanged(webview: vscode.Webview) {
+    this.postCatalogs(webview);
+    await this.onCatalogsChanged?.();
   }
 
   private getHtmlContent(webview: vscode.Webview): string {

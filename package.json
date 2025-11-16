@@ -51,6 +51,16 @@
           "id": "artifact-hub.search",
           "name": "Search",
           "type": "webview"
+        },
+        {
+          "id": "artifact-hub.installed",
+          "name": "Installed",
+          "type": "webview"
+        },
+        {
+          "id": "artifact-hub.repositories",
+          "name": "Repositories",
+          "type": "webview"
         }
       ]
     },
@@ -68,6 +78,11 @@
       {
         "command": "artifact-hub.addRepository",
         "title": "Add Repository",
+        "category": "Artifact Hub"
+      },
+      {
+        "command": "artifact-hub.removeRepository",
+        "title": "Remove Repository",
         "category": "Artifact Hub"
       },
       {

@@ -37,7 +37,9 @@ Artifact Hub is a VS Code extension that provides a marketplace for AI developme
 2. Click the Artifact Hub icon in the Activity Bar
 3. Add a catalog repository
 
-### Adding a Catalog
+### Managing Catalogs
+
+#### Adding a Catalog
 
 Click **Add Repository** in the Repositories view and enter:
 - **URL**: Raw URL to `copilot-catalog.json`
@@ -49,6 +51,19 @@ Click **Add Repository** in the Repositories view and enter:
 GitHub:  https://raw.githubusercontent.com/org/repo/main/copilot-catalog.json
 GitLab:  https://gitlab.com/org/repo/-/raw/main/copilot-catalog.json
 ```
+
+#### Removing a Catalog
+
+You can remove a catalog in two ways:
+
+1. **From the Repositories view**: Click the **Remove** button on any repository card
+2. **From the Command Palette**: Run `Artifact Hub: Remove Repository` and select from the list
+
+When you remove a repository, the extension will:
+- Prompt for confirmation if there are installed artifacts from that repository
+- Automatically delete all installed artifacts from that repository
+- Clean up all database records and metadata
+- Update your workspace settings
 
 ### Installing Artifacts
 
@@ -110,6 +125,7 @@ See [`examples/sample-catalog.json`](examples/sample-catalog.json) for a complet
 - `Artifact Hub: Search Artifacts` - Open search view
 - `Artifact Hub: View Installed Artifacts` - View installed artifacts
 - `Artifact Hub: Add Repository` - Add a new catalog
+- `Artifact Hub: Remove Repository` - Remove a catalog and its installed artifacts
 - `Artifact Hub: Refresh Catalogs` - Refresh all catalogs
 
 ## Authentication

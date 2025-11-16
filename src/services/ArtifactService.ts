@@ -103,17 +103,16 @@ export class ArtifactService {
 
     // Delete supporting files directory if it exists
     try {
-      const chatmodeDir = path.dirname(installation.installedPath);
-      const supportingDir = path.join(chatmodeDir, artifactId);
+      const workspaceRoot = this.getWorkspaceRootPath();
+      const supportingDir = path.join(workspaceRoot, '.github', `.${artifactId}`);
+      await this.deleteDirectoryIfExists(supportingDir);
 
-      // Check if directory exists
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(supportingDir));
-        // Directory exists, delete it recursively
-        await vscode.workspace.fs.delete(vscode.Uri.file(supportingDir), { recursive: true });
-      } catch {
-        // Directory doesn't exist, that's fine
-      }
+      // Clean up legacy locations if they exist
+      const legacyHiddenDir = path.join(workspaceRoot, `.${artifactId}`);
+      await this.deleteDirectoryIfExists(legacyHiddenDir);
+
+      const legacyDir = path.join(path.dirname(installation.installedPath), artifactId);
+      await this.deleteDirectoryIfExists(legacyDir);
     } catch (err) {
       console.error('Failed to delete supporting files:', err);
       // Continue to remove from DB
@@ -277,9 +276,8 @@ export class ArtifactService {
     // Get the catalog base URL from the artifact source URL
     const catalogBaseUrl = this.getCatalogBaseUrl(artifact.sourceUrl, artifact.path);
 
-    // Create supporting files directory adjacent to main chatmode file
-    const chatmodeDir = path.dirname(mainFilePath);
-    const supportingDir = path.join(chatmodeDir, artifact.id);
+    const workspaceRoot = this.getWorkspaceRootPath();
+    const supportingDir = path.join(workspaceRoot, '.github', `.${artifact.id}`);
 
     let downloadedCount = startCount;
 
@@ -297,7 +295,7 @@ export class ArtifactService {
         const content = await this.http.fetchText(fileUrl, { auth });
 
         // Extract relative path from the supporting file path
-        // e.g., "chatmodes/.../ceo-advisor/scripts/analyzer.py" -> "scripts/analyzer.py"
+        // e.g., "chatmodes/.../.ceo-advisor/scripts/analyzer.py" -> "scripts/analyzer.py"
         const relativePath = this.extractRelativePath(filePath, artifact.id);
         const targetPath = path.join(supportingDir, relativePath);
 
@@ -351,30 +349,49 @@ export class ArtifactService {
   }
 
   private extractRelativePath(fullPath: string, artifactId: string): string {
-    // Extract the relative path after the artifact ID directory
-    // e.g., "chatmodes/generated/.../ceo-advisor/scripts/analyzer.py" -> "scripts/analyzer.py"
+    // Extract the relative path after the artifact directory.
+    // Supports both "<artifactId>/..." and ".<artifactId>/..." layouts.
     const parts = fullPath.split('/');
-    const artifactIndex = parts.findIndex(p => p === artifactId);
+    const dotArtifactId = `.${artifactId}`;
 
+    const dotIndex = parts.findIndex((part) => part === dotArtifactId);
+    if (dotIndex >= 0 && dotIndex < parts.length - 1) {
+      return parts.slice(dotIndex + 1).join('/');
+    }
+
+    const artifactIndex = parts.findIndex((part) => part === artifactId);
     if (artifactIndex >= 0 && artifactIndex < parts.length - 1) {
       return parts.slice(artifactIndex + 1).join('/');
     }
 
-    // Fallback: return the filename
-    return parts[parts.length - 1] || fullPath;
+    const filename = parts[parts.length - 1];
+    return filename || fullPath;
   }
 
-  private getInstallPath(artifact: ArtifactWithSource, installRoot: string): string {
+  private getWorkspaceRootPath(): string {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       throw new Error('No workspace folder open');
     }
+    return workspaceFolder.uri.fsPath;
+  }
 
+  private async deleteDirectoryIfExists(targetPath: string): Promise<void> {
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(targetPath));
+      await vscode.workspace.fs.delete(vscode.Uri.file(targetPath), { recursive: true });
+    } catch {
+      // Directory missing is fine
+    }
+  }
+
+  private getInstallPath(artifact: ArtifactWithSource, installRoot: string): string {
+    const workspaceRoot = this.getWorkspaceRootPath();
     const subdir = ARTIFACT_PATHS[artifact.type];
     const ext = ARTIFACT_EXTENSIONS[artifact.type];
     const filename = `${artifact.id}${ext}`;
 
-    return path.join(workspaceFolder.uri.fsPath, installRoot, subdir, filename);
+    return path.join(workspaceRoot, installRoot, subdir, filename);
   }
 
   private async checkConflict(targetPath: string): Promise<boolean> {

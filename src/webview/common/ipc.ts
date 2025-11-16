@@ -15,6 +15,7 @@ export type WebviewMessage =
   | { type: 'update'; catalogId: string; artifactId: string }
   | { type: 'preview'; catalogId: string; artifactId: string }
   | { type: 'getInstalled' }
+  | { type: 'showInstallationDetails'; installation: InstallationWithUpdate }
   | { type: 'getCatalogs' }
   | { type: 'addCatalog'; config: CatalogRepoConfig }
   | { type: 'removeCatalog'; catalogId: string }

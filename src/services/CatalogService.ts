@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import type Database from 'better-sqlite3';
 import type { DatabaseService } from '../storage/Database';
 import type { HttpClient } from './HttpClient';
@@ -48,6 +49,40 @@ export class CatalogService {
   }
 
   async removeCatalog(catalogId: string): Promise<void> {
+    const catalog = this.getCatalog(catalogId);
+    if (!catalog) {
+      throw new Error(`Catalog ${catalogId} not found`);
+    }
+
+    // Get all installations from this catalog
+    const installations = this.db.getDb().prepare(`
+      SELECT installed_path FROM installations WHERE catalog_id = ?
+    `).all(catalogId) as Array<{ installed_path: string }>;
+
+    // Confirm deletion if there are installed artifacts
+    if (installations.length > 0) {
+      const confirm = await vscode.window.showWarningMessage(
+        `This will remove ${installations.length} installed artifact(s) from "${catalog.metadata.name}". Continue?`,
+        { modal: true },
+        'Remove'
+      );
+
+      if (confirm !== 'Remove') {
+        return;
+      }
+
+      // Delete all installed files
+      for (const installation of installations) {
+        try {
+          await vscode.workspace.fs.delete(vscode.Uri.file(installation.installed_path), { recursive: true });
+        } catch (err) {
+          console.error(`Failed to delete ${installation.installed_path}:`, err);
+          // Continue with other files
+        }
+      }
+    }
+
+    // Delete from database (CASCADE will handle artifacts and installations)
     this.db.getDb().prepare('DELETE FROM catalogs WHERE id = ?').run(catalogId);
   }
 
@@ -137,6 +172,7 @@ export class CatalogService {
       error: row.error,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
+      artifactCount: this.getArtifactCount(row.id),
     };
   }
 
@@ -157,6 +193,7 @@ export class CatalogService {
       error: row.error,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
+      artifactCount: this.getArtifactCount(row.id),
     }));
   }
 

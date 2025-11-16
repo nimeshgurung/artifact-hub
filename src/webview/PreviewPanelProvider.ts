@@ -15,10 +15,12 @@ export class PreviewPanelProvider {
   constructor(
     private context: vscode.ExtensionContext,
     private artifactService: ArtifactService,
-    private config: Configuration
+    private config: Configuration,
+    private onStateChanged?: () => void | Promise<void>
   ) {}
 
   public async showPreview(artifact: ArtifactWithSource, content: string) {
+    const isInstalled = !!this.artifactService.getInstallation(artifact.catalogId, artifact.id);
     const columnToShowIn = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
@@ -29,7 +31,7 @@ export class PreviewPanelProvider {
       // If panel exists, reveal it and update content
       PreviewPanelProvider.currentPanel.reveal(columnToShowIn);
       PreviewPanelProvider.currentPanel.title = artifact.name;
-      this.updateContent(PreviewPanelProvider.currentPanel.webview, artifact, content);
+      this.updateContent(PreviewPanelProvider.currentPanel.webview, artifact, content, isInstalled);
     } else {
       // Create new panel
       PreviewPanelProvider.currentPanel = vscode.window.createWebviewPanel(
@@ -46,7 +48,7 @@ export class PreviewPanelProvider {
       );
 
       // Set initial content
-      this.updateContent(PreviewPanelProvider.currentPanel.webview, artifact, content);
+      this.updateContent(PreviewPanelProvider.currentPanel.webview, artifact, content, isInstalled);
 
       // Handle messages from the webview
       PreviewPanelProvider.currentPanel.webview.onDidReceiveMessage(
@@ -101,6 +103,7 @@ export class PreviewPanelProvider {
             }
           });
 
+          await this.onStateChanged?.();
           // Close the preview panel after successful install
           panel.dispose();
         } else {
@@ -114,6 +117,7 @@ export class PreviewPanelProvider {
           await this.artifactService.uninstall(artifact.catalogId, artifact.id);
           vscode.window.showInformationMessage(`Uninstalled ${artifact.name}`);
 
+          await this.onStateChanged?.();
           // Close the preview panel after successful uninstall
           panel.dispose();
         } catch (err) {
@@ -130,12 +134,15 @@ export class PreviewPanelProvider {
     }
   }
 
-  private updateContent(webview: vscode.Webview, artifact: ArtifactWithSource, content: string) {
+  private updateContent(
+    webview: vscode.Webview,
+    artifact: ArtifactWithSource,
+    content: string,
+    installed: boolean
+  ) {
     const cssUri = webview.asWebviewUri(
       vscode.Uri.file(path.join(this.context.extensionPath, 'media', 'preview.css'))
     );
-
-    const installed = false; // TODO: Check installation status
 
     webview.html = `<!DOCTYPE html>
 <html lang="en">

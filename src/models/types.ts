@@ -141,6 +141,7 @@ export interface CatalogRecord {
   error: string | null;
   createdAt: Date;
   updatedAt: Date;
+  artifactCount: number;
 }
 
 export interface Installation {
