@@ -47,10 +47,19 @@ export class UrlResolver {
     const cleanUrl = baseUrl.replace(/\/$/, '');
 
     // If baseUrl already ends with a filename (has extension), get directory
-    if (/\.[a-z0-9]+$/i.test(cleanUrl)) {
-      const lastSlash = cleanUrl.lastIndexOf('/');
-      const directory = cleanUrl.substring(0, lastSlash);
-      return `${directory}/${artifactPath}`;
+    // But don't treat domain TLDs as file extensions
+    try {
+      const urlObj = new URL(cleanUrl);
+      const pathname = urlObj.pathname;
+
+      // If there's a pathname with a file extension (e.g., /path/catalog.json)
+      if (pathname && pathname !== '/' && /\.[a-z0-9]+$/i.test(pathname)) {
+        const lastSlash = cleanUrl.lastIndexOf('/');
+        const directory = cleanUrl.substring(0, lastSlash);
+        return `${directory}/${artifactPath}`;
+      }
+    } catch {
+      // Invalid URL, fall through to simple concatenation
     }
 
     return `${cleanUrl}/${artifactPath}`;
