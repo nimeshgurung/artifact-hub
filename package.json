@@ -2,7 +2,7 @@
   "name": "artifact-hub",
   "displayName": "Artifact Hub",
   "description": "Discover, install, and manage AI development artifacts from any Git platform",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "nimsbhai",
   "icon": "resources/icon.png",
   "repository": {
